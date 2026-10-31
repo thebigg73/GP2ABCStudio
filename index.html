@@ -62,6 +62,18 @@
       max-width: 100%;
       height: auto;
     }
+
+    /* Force all ABC notation SVG paths and text to render crisp dark charcoal/black */
+    #abc-paper svg {
+    fill: #1e293b !important;
+    stroke: #1e293b !important;
+    }
+
+    /* Ensure staff lines are visible */
+    #abc-paper svg path {
+      stroke: #1e293b !important;
+    }
+    
   </style>
 </head>
 <body class="bg-darkbg text-slate-100 min-h-screen font-sans flex flex-col">
