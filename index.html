@@ -578,7 +578,7 @@
   if (!visualObj || !visualObj[0]) return;
 
   try {
-    // 1. Initialize AudioContext if not already created
+    // 1. Ensure AudioContext exists and is active
     if (!audioContext) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       audioContext = new AudioContextClass();
@@ -587,23 +587,25 @@
       await audioContext.resume();
     }
 
-    // 2. Initialize synth control
+    // 2. Instantiate audio synth
     if (!synthControl) {
       synthControl = new ABCJS.synth.CreateSynth();
     }
 
-    // 3. Get timing notes safely across different abcjs versions
-    const timingNotes = (ABCJS.synth && typeof ABCJS.synth.getTimingNotes === "function")
-      ? ABCJS.synth.getTimingNotes(visualObj[0])
-      : (typeof visualObj[0].getNotes === "function" ? visualObj[0].getNotes() : []);
-
-    // 4. Prime and play audio
-    await synthControl.init({
-      audioContext: audioContext,
+    // 3. Initialize audio buffer with visualObj (abcjs v6 API syntax)
+    const options = {
       visualObj: visualObj[0],
+      audioContext: audioContext,
       millisecondsPerMeasure: visualObj[0].millisecondsPerMeasure()
-    });
+    };
 
+    if (typeof synthControl.init === "function") {
+      await synthControl.init(options);
+    } else if (typeof synthControl.initSynthesizer === "function") {
+      await synthControl.initSynthesizer(options);
+    }
+
+    // 4. Prime and start playback
     await synthControl.prime();
     synthControl.start();
   } catch (err) {
