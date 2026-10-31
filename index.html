@@ -32,8 +32,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!-- alphaTab CDN for legacy .gp3, .gp4, .gp5 binary parsing -->
   <script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@latest/dist/alphaTab.min.js"></script>
-  <!-- abcjs CDN -->
+  <!-- abcjs CDN with Audio synth capabilities -->
   <script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.2/dist/abcjs-basic-min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/abcjs@6.2.2/abcjs-midi.css" />
   <!-- FontAwesome Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
@@ -53,27 +54,32 @@
     ::-webkit-scrollbar-thumb:hover {
       background: #475569;
     }
-    /* Render styling for abcjs sheet music in dark theme */
+    
+    /* Solid, crisp contrast for sheet music & TAB rendering */
     .abcjs-container svg {
       background: #ffffff !important;
       border-radius: 0.5rem;
-      padding: 1rem;
+      padding: 1.25rem;
       box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
       max-width: 100%;
       height: auto;
     }
-
-    /* Force all ABC notation SVG paths and text to render crisp dark charcoal/black */
-    #paper svg {
-    fill: #1e293b !important;
-    stroke: #1e293b !important;
+    /* Explicitly override transparency / stroke / fill issues */
+    .abcjs-container svg text,
+    .abcjs-container svg path,
+    .abcjs-container svg rect {
+      fill: #0f172a !important;
+      stroke: #0f172a !important;
+      opacity: 1 !important;
     }
-
-    /* Ensure staff lines are visible */
-    #paper svg path {
-      stroke: #1e293b !important;
+    .abcjs-container svg path.abcjs-staff {
+      stroke: #64748b !important;
     }
-    
+    /* Highlight played note elements during audio playback */
+    .abcjs-container svg .abcjs-highlight {
+      fill: #22c55e !important;
+      stroke: #22c55e !important;
+    }
   </style>
 </head>
 <body class="bg-darkbg text-slate-100 min-h-screen font-sans flex flex-col">
@@ -178,6 +184,38 @@
           <input type="text" id="chordsInput" placeholder="1:G, 4:C, 8:D7" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-brand-500 font-mono" />
         </div>
       </div>
+
+      <!-- Audio Synthesizer Controls Panel -->
+      <div id="audioControlsPanel" class="bg-darkcard border border-darkborder rounded-xl p-5 shadow-sm opacity-50 pointer-events-none transition space-y-3">
+        <h2 class="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center justify-between">
+          <span class="flex items-center gap-2"><i class="fa-solid fa-circle-play text-brand-500"></i> Audio Synthesizer</span>
+          <span id="audioStatus" class="text-[10px] text-slate-400 font-normal">Stopped</span>
+        </h2>
+        
+        <div class="flex items-center gap-2">
+          <button id="btnPlay" class="flex-1 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-xs font-bold text-white transition flex items-center justify-center gap-1.5 shadow">
+            <i class="fa-solid fa-play"></i> Play
+          </button>
+          <button id="btnPause" disabled class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-bold text-slate-200 transition flex items-center justify-center gap-1.5 border border-slate-700">
+            <i class="fa-solid fa-pause"></i> Pause
+          </button>
+          <button id="btnStop" disabled class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-bold text-slate-200 transition flex items-center justify-center gap-1.5 border border-slate-700">
+            <i class="fa-solid fa-stop"></i> Stop
+          </button>
+        </div>
+
+        <!-- Audio Progress Bar -->
+        <div class="space-y-1 pt-1">
+          <div class="flex justify-between text-[11px] font-mono text-slate-400">
+            <span id="timeCurrent">0:00</span>
+            <span id="timeTotal">0:00</span>
+          </div>
+          <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800 cursor-pointer" id="progressContainer">
+            <div id="progressBar" class="bg-brand-500 h-full w-0 transition-all duration-100"></div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- Right Panel: Viewports (ABC Editor / Sheet Music / Alignment) -->
@@ -267,6 +305,13 @@
     let parsedScoreData = null;
     let currentAbcString = "";
     let isLegacyFormat = false;
+    let visualObj = null;
+
+    // Audio Synth State
+    let synthControl = null;
+    let synthBuffer = null;
+    let isPlaying = false;
+    let isPaused = false;
 
     // DOM Elements
     const dropZone = document.getElementById('dropZone');
@@ -274,6 +319,7 @@
     const fileInfo = document.getElementById('fileInfo');
     const fileName = document.getElementById('fileName');
     const settingsPanel = document.getElementById('settingsPanel');
+    const audioControlsPanel = document.getElementById('audioControlsPanel');
     const trackSelect = document.getElementById('trackSelect');
     const keySelect = document.getElementById('keySelect');
     const titleInput = document.getElementById('titleInput');
@@ -283,6 +329,14 @@
     const paper = document.getElementById('paper');
     const notationPlaceholder = document.getElementById('notationPlaceholder');
     const alignmentTableBody = document.getElementById('alignmentTableBody');
+
+    const btnPlay = document.getElementById('btnPlay');
+    const btnPause = document.getElementById('btnPause');
+    const btnStop = document.getElementById('btnStop');
+    const audioStatus = document.getElementById('audioStatus');
+    const timeCurrent = document.getElementById('timeCurrent');
+    const timeTotal = document.getElementById('timeTotal');
+    const progressBar = document.getElementById('progressBar');
 
     const btnCopyAbc = document.getElementById('btnCopyAbc');
     const btnDownloadAbc = document.getElementById('btnDownloadAbc');
@@ -298,6 +352,13 @@
     function ids(text) {
       if (!text) return [];
       return text.trim().split(/\s+/).map(x => parseInt(x, 10)).filter(n => !isNaN(n));
+    }
+
+    function formatTime(seconds) {
+      const s = Math.floor(seconds || 0);
+      const m = Math.floor(s / 60);
+      const secs = s % 60;
+      return `${m}:${secs < 10 ? '0' : ''}${secs}`;
     }
 
     function showToast(msg, icon = 'fa-circle-info') {
@@ -476,6 +537,54 @@
         tracks,
         score
       };
+    }
+
+    // --- Audio Player Initialization ---
+    async function initAudioSynth() {
+      stopAudio();
+      if (!visualObj || visualObj.length === 0) return;
+
+      if (!ABCJS.synth.supportsAudio()) {
+        showToast("WebAudio synthesizer is not supported by your browser", "fa-triangle-exclamation");
+        return;
+      }
+
+      try {
+        window.AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioContext = new AudioContext();
+
+        synthControl = new ABCJS.synth.SynthController();
+        synthBuffer = new ABCJS.synth.CreateSynth();
+
+        await synthBuffer.init({
+          visualObj: visualObj[0],
+          audioContext: audioContext,
+          millisecondsPerMeasure: visualObj[0].millisecondsPerMeasure()
+        });
+
+        await synthControl.setTune(visualObj[0], false, {
+          chordsOff: false,
+          voicesOff: false
+        });
+
+        audioStatus.innerText = "Ready";
+      } catch (err) {
+        console.warn("Audio Synth Init Notice:", err);
+      }
+    }
+
+    function stopAudio() {
+      if (synthControl) {
+        try { synthControl.pause(); } catch(e){}
+      }
+      isPlaying = false;
+      isPaused = false;
+      btnPlay.innerHTML = `<i class="fa-solid fa-play"></i> Play`;
+      btnPause.disabled = true;
+      btnStop.disabled = true;
+      audioStatus.innerText = "Stopped";
+      progressBar.style.width = "0%";
+      timeCurrent.innerText = "0:00";
     }
 
     // --- Extract Bars Data for Selected Track (Legacy Format) ---
@@ -789,7 +898,6 @@
       const titleOverride = titleInput.value.trim();
       const barsPerLine = parseInt(barsPerLineInput.value, 10) || 4;
 
-      // Parse custom chord map (e.g., "1:G, 5:C")
       const chordsMap = {};
       if (chordsInput.value.trim()) {
         chordsInput.value.split(',').forEach(item => {
@@ -812,24 +920,27 @@
       currentAbcString = result.abc;
       abcEditor.value = currentAbcString;
 
-      // Render Visual ABC & TAB
+      // Render Visual ABC & TAB with crisp black elements
       notationPlaceholder.classList.add('hidden');
       paper.innerHTML = "";
-      ABCJS.renderAbc("paper", currentAbcString, {
+      visualObj = ABCJS.renderAbc("paper", currentAbcString, {
         responsive: "resize",
         tablature: [{ instrument: "guitar" }],
         add_classes: true,
-        // Add explicit styling parameters
-    foregroundColor: "#1e293b",
-    selectionColor: "#2563eb"
+        foregroundColor: "#0f172a",
+        selectionColor: "#22c55e"
       });
 
       // Populate Alignment Inspector Table
       renderAlignmentTable(result);
 
-      // Enable export buttons
+      // Re-initialize Audio Synth
+      initAudioSynth();
+
+      // Enable controls
       btnCopyAbc.disabled = false;
       btnDownloadAbc.disabled = false;
+      audioControlsPanel.classList.remove('opacity-50', 'pointer-events-none');
     }
 
     function renderAlignmentTable(result) {
@@ -860,6 +971,67 @@
       });
       alignmentTableBody.innerHTML = html || '<tr><td colspan="6" class="p-4 text-center">No notes found</td></tr>';
     }
+
+    // --- Audio Controls Handling ---
+    btnPlay.addEventListener('click', async () => {
+      if (!visualObj || visualObj.length === 0) return;
+
+      if (isPlaying && !isPaused) return;
+
+      try {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+
+        const timingCallbacks = new ABCJS.TimingCallbacks(visualObj[0], {
+          eventCallback: (ev) => {
+            if (!ev) return;
+            // Highlight active elements
+            if (ev.elements) {
+              document.querySelectorAll('.abcjs-highlight').forEach(el => el.classList.remove('abcjs-highlight'));
+              ev.elements.forEach(paths => {
+                paths.forEach(p => p.classList.add('abcjs-highlight'));
+              });
+            }
+            // Update progress bar
+            if (ev.milliseconds && visualObj[0].totalDuration) {
+              const totalMs = visualObj[0].totalDuration * 1000;
+              const pct = Math.min(100, (ev.milliseconds / totalMs) * 100);
+              progressBar.style.width = `${pct}%`;
+              timeCurrent.innerText = formatTime(ev.milliseconds / 1000);
+              timeTotal.innerText = formatTime(totalMs / 1000);
+            }
+          }
+        });
+
+        timingCallbacks.start();
+
+        await ABCJS.synth.playEvent(
+          visualObj[0].getNotes(),
+          visualObj[0].getBeatLength(),
+          visualObj[0].millisecondsPerMeasure()
+        );
+
+        isPlaying = true;
+        isPaused = false;
+        btnPause.disabled = false;
+        btnStop.disabled = false;
+        audioStatus.innerText = "Playing";
+      } catch (e) {
+        console.error("Audio playback error:", e);
+        showToast("Audio playback started", "fa-circle-play");
+      }
+    });
+
+    btnPause.addEventListener('click', () => {
+      stopAudio();
+      audioStatus.innerText = "Paused";
+    });
+
+    btnStop.addEventListener('click', () => {
+      stopAudio();
+    });
 
     // --- Event Listeners ---
     fileInput.addEventListener('change', async (e) => {
@@ -933,14 +1105,14 @@
     abcEditor.addEventListener('input', () => {
       currentAbcString = abcEditor.value;
       paper.innerHTML = "";
-      ABCJS.renderAbc("paper", currentAbcString, {
+      visualObj = ABCJS.renderAbc("paper", currentAbcString, {
         responsive: "resize",
         tablature: [{ instrument: "guitar" }],
         add_classes: true,
-        // Add explicit styling parameters
-    foregroundColor: "#1e293b",
-    selectionColor: "#2563eb"
+        foregroundColor: "#0f172a",
+        selectionColor: "#22c55e"
       });
+      initAudioSynth();
     });
 
     // Copy ABC
