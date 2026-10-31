@@ -587,16 +587,16 @@
       await audioContext.resume();
     }
 
-    // 2. Instantiate audio synth
+    // 2. Instantiate audio synth engine
     if (!synthControl) {
       synthControl = new ABCJS.synth.CreateSynth();
     }
 
-    // 3. Initialize audio buffer with visualObj (abcjs v6 API syntax)
+    // 3. Initialize audio buffer with visualObj (handles abcjs v6 variants)
     const options = {
       visualObj: visualObj[0],
       audioContext: audioContext,
-      millisecondsPerMeasure: visualObj[0].millisecondsPerMeasure()
+      millisecondsPerMeasure: visualObj[0].millisecondsPerMeasure ? visualObj[0].millisecondsPerMeasure() : 2000
     };
 
     if (typeof synthControl.init === "function") {
@@ -605,9 +605,15 @@
       await synthControl.initSynthesizer(options);
     }
 
-    // 4. Prime and start playback
-    await synthControl.prime();
-    synthControl.start();
+    // 4. Prime the synth if the method exists on this abcjs build
+    if (typeof synthControl.prime === "function") {
+      await synthControl.prime();
+    }
+
+    // 5. Start audio playback
+    if (typeof synthControl.start === "function") {
+      synthControl.start();
+    }
   } catch (err) {
     console.error("Audio playback error:", err);
   }
