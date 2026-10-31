@@ -292,11 +292,6 @@
 
   <!-- JavaScript Application Logic -->
   <script>
-    // Top-level declarations
-let audioContext = null;
-let synthControl = null;
-let visualObj = null;
-    
     // --- Constant Maps from Python script ---
     const DUR16 = { "Whole": 16, "Half": 8, "Quarter": 4, "Eighth": 2, "16th": 1 };
     const KEY_NAME = {
@@ -311,6 +306,7 @@ let visualObj = null;
     let currentAbcString = "";
     let isLegacyFormat = false;
     let visualObj = null;
+    let audioContext = null;
 
     // Audio Synth State
     let synthControl = null;
