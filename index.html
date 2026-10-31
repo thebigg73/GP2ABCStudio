@@ -292,6 +292,11 @@
 
   <!-- JavaScript Application Logic -->
   <script>
+    // Top-level declarations
+let audioContext = null;
+let synthControl = null;
+let visualObj = null;
+    
     // --- Constant Maps from Python script ---
     const DUR16 = { "Whole": 16, "Half": 8, "Quarter": 4, "Eighth": 2, "16th": 1 };
     const KEY_NAME = {
@@ -577,29 +582,26 @@
   if (!visualObj || !visualObj[0]) return;
 
   try {
-    // Check if AudioContext is available and running
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    // 1. Initialize AudioContext if not already created
     if (!audioContext) {
-      audioContext = new AudioContext();
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      audioContext = new AudioContextClass();
     }
     if (audioContext.state === "suspended") {
       await audioContext.resume();
     }
 
+    // 2. Initialize synth control
     if (!synthControl) {
       synthControl = new ABCJS.synth.CreateSynth();
     }
 
-    // Use ABCJS.synth.getTimingNotes or fall back safely to visualObj[0]
-    const timingNotes = ABCJS.synth && ABCJS.synth.getTimingNotes 
+    // 3. Get timing notes safely across different abcjs versions
+    const timingNotes = (ABCJS.synth && typeof ABCJS.synth.getTimingNotes === "function")
       ? ABCJS.synth.getTimingNotes(visualObj[0])
       : (typeof visualObj[0].getNotes === "function" ? visualObj[0].getNotes() : []);
 
-    if (!timingNotes || timingNotes.length === 0) {
-      console.warn("No timing notes extracted from score.");
-      return;
-    }
-
+    // 4. Prime and play audio
     await synthControl.init({
       audioContext: audioContext,
       visualObj: visualObj[0],
@@ -612,6 +614,7 @@
     console.error("Audio playback error:", err);
   }
 }
+    
     function stopAudio() {
       if (synthControl) {
         try { synthControl.pause(); } catch(e){}
