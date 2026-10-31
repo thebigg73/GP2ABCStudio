@@ -578,7 +578,7 @@
   if (!visualObj || !visualObj[0]) return;
 
   try {
-    // 1. Ensure AudioContext exists and is active
+    // 1. Ensure AudioContext is active
     if (!audioContext) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       audioContext = new AudioContextClass();
@@ -587,30 +587,31 @@
       await audioContext.resume();
     }
 
-    // 2. Instantiate audio synth engine
+    // 2. Instantiate audio synth
     if (!synthControl) {
       synthControl = new ABCJS.synth.CreateSynth();
     }
 
-    // 3. Initialize audio buffer with visualObj (handles abcjs v6 variants)
-    const options = {
+    // 3. Initialize with explicit soundfont URL and visual object
+    await synthControl.init({
       visualObj: visualObj[0],
       audioContext: audioContext,
-      millisecondsPerMeasure: visualObj[0].millisecondsPerMeasure ? visualObj[0].millisecondsPerMeasure() : 2000
-    };
+      millisecondsPerMeasure: visualObj[0].millisecondsPerMeasure ? visualObj[0].millisecondsPerMeasure() : 2000,
+      soundFontUrl: "https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/"
+    });
 
-    if (typeof synthControl.init === "function") {
-      await synthControl.init(options);
-    } else if (typeof synthControl.initSynthesizer === "function") {
-      await synthControl.initSynthesizer(options);
-    }
-
-    // 4. Prime the synth if the method exists on this abcjs build
+    // 4. Prime the audio buffer (calculates exact note durations)
     if (typeof synthControl.prime === "function") {
       await synthControl.prime();
     }
 
-    // 5. Start audio playback
+    // 5. Update UI duration display if available
+    if (synthControl.getDuration) {
+      const totalSecs = synthControl.getDuration();
+      console.log("Calculated score audio duration:", totalSecs, "seconds");
+    }
+
+    // 6. Start audio playback
     if (typeof synthControl.start === "function") {
       synthControl.start();
     }
