@@ -573,6 +573,45 @@
       }
     }
 
+    async function startAudio() {
+  if (!visualObj || !visualObj[0]) return;
+
+  try {
+    // Check if AudioContext is available and running
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!audioContext) {
+      audioContext = new AudioContext();
+    }
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+
+    if (!synthControl) {
+      synthControl = new ABCJS.synth.CreateSynth();
+    }
+
+    // Use ABCJS.synth.getTimingNotes or fall back safely to visualObj[0]
+    const timingNotes = ABCJS.synth && ABCJS.synth.getTimingNotes 
+      ? ABCJS.synth.getTimingNotes(visualObj[0])
+      : (typeof visualObj[0].getNotes === "function" ? visualObj[0].getNotes() : []);
+
+    if (!timingNotes || timingNotes.length === 0) {
+      console.warn("No timing notes extracted from score.");
+      return;
+    }
+
+    await synthControl.init({
+      audioContext: audioContext,
+      visualObj: visualObj[0],
+      millisecondsPerMeasure: visualObj[0].millisecondsPerMeasure()
+    });
+
+    await synthControl.prime();
+    synthControl.start();
+  } catch (err) {
+    console.error("Audio playback error:", err);
+  }
+}
     function stopAudio() {
       if (synthControl) {
         try { synthControl.pause(); } catch(e){}
@@ -974,54 +1013,7 @@
 
     // --- Audio Controls Handling ---
     btnPlay.addEventListener('click', async () => {
-      if (!visualObj || visualObj.length === 0) return;
-
-      if (isPlaying && !isPaused) return;
-
-      try {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioContext.state === 'suspended') {
-          await audioContext.resume();
-        }
-
-        const timingCallbacks = new ABCJS.TimingCallbacks(visualObj[0], {
-          eventCallback: (ev) => {
-            if (!ev) return;
-            // Highlight active elements
-            if (ev.elements) {
-              document.querySelectorAll('.abcjs-highlight').forEach(el => el.classList.remove('abcjs-highlight'));
-              ev.elements.forEach(paths => {
-                paths.forEach(p => p.classList.add('abcjs-highlight'));
-              });
-            }
-            // Update progress bar
-            if (ev.milliseconds && visualObj[0].totalDuration) {
-              const totalMs = visualObj[0].totalDuration * 1000;
-              const pct = Math.min(100, (ev.milliseconds / totalMs) * 100);
-              progressBar.style.width = `${pct}%`;
-              timeCurrent.innerText = formatTime(ev.milliseconds / 1000);
-              timeTotal.innerText = formatTime(totalMs / 1000);
-            }
-          }
-        });
-
-        timingCallbacks.start();
-
-        await ABCJS.synth.playEvent(
-          visualObj[0].getNotes(),
-          visualObj[0].getBeatLength(),
-          visualObj[0].millisecondsPerMeasure()
-        );
-
-        isPlaying = true;
-        isPaused = false;
-        btnPause.disabled = false;
-        btnStop.disabled = false;
-        audioStatus.innerText = "Playing";
-      } catch (e) {
-        console.error("Audio playback error:", e);
-        showToast("Audio playback started", "fa-circle-play");
-      }
+      startAudio();
     });
 
     btnPause.addEventListener('click', () => {
