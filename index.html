@@ -578,7 +578,7 @@
   if (!visualObj || !visualObj[0]) return;
 
   try {
-    // 1. Ensure AudioContext exists and is active
+    // 1. Ensure AudioContext exists and is running
     if (!audioContext) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       audioContext = new AudioContextClass();
@@ -587,33 +587,40 @@
       await audioContext.resume();
     }
 
-    // 2. Instantiate audio synth
+    // 2. Ensure a container DOM element exists for the synth control binding
+    let audioTarget = document.getElementById("abc-audio-target");
+    if (!audioTarget) {
+      audioTarget = document.createElement("div");
+      audioTarget.id = "abc-audio-target";
+      audioTarget.style.display = "none";
+      document.body.appendChild(audioTarget);
+    }
+
+    // 3. Initialize SynthController or CreateSynth with valid element/options
     if (!synthControl) {
-      synthControl = new ABCJS.synth.CreateSynth();
+      if (ABCJS.synth.SynthController) {
+        synthControl = new ABCJS.synth.SynthController();
+        synthControl.load(audioTarget, null, {
+          displayLoop: true,
+          displayRestart: true,
+          displayPlay: true,
+          displayProgress: true
+        });
+      } else {
+        synthControl = new ABCJS.synth.CreateSynth();
+      }
     }
 
-    // 3. Load visual object and audio context using .load()
-    const options = {
-      visualObj: visualObj[0],
+    // 4. Load score timing data into the synth engine
+    await synthControl.setTune(visualObj[0], false, {
       audioContext: audioContext,
-      millisecondsPerMeasure: visualObj[0].millisecondsPerMeasure ? visualObj[0].millisecondsPerMeasure() : 2000,
       soundFontUrl: "https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/"
-    };
+    });
 
-    if (typeof synthControl.load === "function") {
-      await synthControl.load(options);
-    } else if (typeof synthControl.init === "function") {
-      await synthControl.init(options);
-    } else {
-      throw new Error("No valid loading method found on synthControl.");
-    }
-
-    // 4. Prime and start audio playback
-    if (typeof synthControl.prime === "function") {
-      await synthControl.prime();
-    }
-
-    if (typeof synthControl.start === "function") {
+    // 5. Start audio playback
+    if (typeof synthControl.play === "function") {
+      synthControl.play();
+    } else if (typeof synthControl.start === "function") {
       synthControl.start();
     }
   } catch (err) {
