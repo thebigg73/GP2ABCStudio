@@ -546,6 +546,38 @@
       return toks;
     }
 
+    // Function callable directly by Android WebView
+window.convertFileForAndroid = async function(base64Data, fileName) {
+  try {
+    // 1. Convert base64 from Android back to ArrayBuffer
+    const binary = atob(base64Data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    // 2. Reuse your existing web app parsing logic
+    const ext = fileName.split('.').pop().toLowerCase();
+    if (ext === 'gp') {
+      parsedScoreData = await parseGpFile(bytes.buffer);
+    } else {
+      parsedScoreData = parseLegacyGpFile(bytes.buffer);
+    }
+
+    // 3. Convert Melody/First track to ABC
+    const trackIndex = 0;
+    const result = convertToAbc(parsedScoreData, trackIndex);
+
+    // 4. Send ABC string back to Android
+    if (window.AndroidBridge) {
+      window.AndroidBridge.onAbcExtracted(result.abc);
+    }
+    return result.abc;
+  } catch (err) {
+    if (window.AndroidBridge) {
+      window.AndroidBridge.onError(err.toString());
+    }
+  }
+};
+
     // --- GP Zip & XML Parser ---
     async function parseGpFile(fileBuffer) {
       const zip = await JSZip.loadAsync(fileBuffer);
