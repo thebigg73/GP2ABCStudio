@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guitar Pro to ABC Converter</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0fdf4',
+              100: '#dcfce7',
+              500: '#22c55e',
+              600: '#16a34a',
+              700: '#15803d',
+              900: '#14532d',
+            },
+            darkbg: '#0f172a',
+            darkcard: '#1e293b',
+            darkborder: '#334155'
+          }
+        }
+      }
+    }
+  </script>
+  <!-- JSZip CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- alphaTab CDN for legacy .gp3, .gp4, .gp5 and .gpx binary parsing -->
+  <script src="https://cdn.jsdelivr.net/npm/@coderline/alphatab@latest/dist/alphaTab.min.js"></script>
+  <!-- abcjs CDN with Audio synth capabilities -->
+  <script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.2/dist/abcjs-basic-min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/abcjs@6.2.2/abcjs-audio.css" />
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+
+    /* Solid, crisp contrast for sheet music & TAB rendering */
+    .abcjs-container svg {
+      background: #ffffff !important;
+      border-radius: 0.5rem;
+      padding: 1.25rem;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+      max-width: 100%;
+      height: auto;
+    }
+    /* Explicitly override transparency / stroke / fill issues */
+    .abcjs-container svg text,
+    .abcjs-container svg path,
+    .abcjs-container svg rect {
+      fill: #0f172a !important;
+      stroke: #0f172a !important;
+      opacity: 1 !important;
+    }
+    .abcjs-container svg path.abcjs-staff {
+      stroke: #64748b !important;
+    }
+    /* Highlight played note elements during audio playback */
+    .abcjs-container svg .abcjs-highlight {
+      fill: #22c55e !important;
+      stroke: #22c55e !important;
+    }
+  </style>
+</head>
+<body class="bg-darkbg text-slate-100 min-h-screen font-sans flex flex-col">
+
+  <!-- Header -->
+  <header class="border-b border-darkborder bg-darkcard/50 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="w-10 h-10 rounded-lg bg-brand-600 flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-brand-600/30">
+          <i class="fa-solid fa-music"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold leading-tight">GP2ABC Studio</h1>
+          <p class="text-xs text-slate-400">Guitar Pro 7/8 to ABC Notation & TAB Converter</p>
+        </div>
+      </div>
+      <div class="flex items-center space-x-3">
+        <button id="btnInfo" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition flex items-center justify-center border border-slate-700 w-8 h-8" title="Library Credits & Licensing">
+          <i class="fa-solid fa-circle-info text-sm"></i>
+        </button>
+        <button id="btnCopyAbc" disabled class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 disabled:opacity-40 transition flex items-center gap-2 border border-slate-700">
+          <i class="fa-regular fa-copy"></i> Copy ABC
+        </button>
+        <button id="btnDownloadAbc" disabled class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-xs font-semibold text-white disabled:opacity-40 transition flex items-center gap-2 shadow-md shadow-brand-600/20">
+          <i class="fa-solid fa-download"></i> Download .abc
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Grid Layout -->
+  <main class="max-w-7xl mx-auto px-4 py-6 flex-1 w-full grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+    <!-- Left Panel: Controls & Options -->
+    <div class="lg:col-span-4 flex flex-col gap-6">
+
+      <!-- Upload Zone -->
+      <div class="bg-darkcard border border-darkborder rounded-xl p-5 shadow-sm">
+        <h2 class="text-sm font-bold text-slate-200 uppercase tracking-wider mb-3 flex items-center gap-2">
+          <i class="fa-solid fa-file-arrow-up text-brand-500"></i> Score Upload
+        </h2>
+        <div id="dropZone" class="border-2 border-dashed border-slate-700 hover:border-brand-500 rounded-lg p-6 text-center cursor-pointer transition bg-slate-900/50 hover:bg-slate-900 flex flex-col items-center justify-center min-h-[140px]">
+          <i class="fa-solid fa-guitar text-3xl text-slate-500 mb-2"></i>
+          <p class="text-sm text-slate-300 font-medium">Drag & drop your score file here</p>
+          <p class="text-xs text-slate-500 mt-1">Guitar Pro (.gp, .gpx, .gp3-5), MusicXML (.xml, .musicxml, .mxl), Capella (.capx), or alphaTex</p>
+          <input type="file" id="fileInput" accept=".gp,.gpx,.gp3,.gp4,.gp5,.xml,.musicxml,.mxl,.capx,.tex,.txt" class="hidden" />
+        </div>
+        <div id="fileInfo" class="mt-3 text-xs text-brand-500 font-medium hidden flex items-center gap-2 bg-brand-900/30 p-2.5 rounded-lg border border-brand-800">
+          <i class="fa-solid fa-circle-check"></i> <span id="fileName" class="truncate"></span>
+        </div>
+      </div>
+
+      <!-- Conversion Settings (Initially Disabled) -->
+      <div id="settingsPanel" class="bg-darkcard border border-darkborder rounded-xl p-5 shadow-sm space-y-4 opacity-50 pointer-events-none transition">
+        <h2 class="text-sm font-bold text-slate-200 uppercase tracking-wider mb-2 flex items-center gap-2">
+          <i class="fa-solid fa-sliders text-brand-500"></i> Conversion Options
+        </h2>
+
+        <!-- Track Selector -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Track</label>
+          <select id="trackSelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-brand-500">
+            <option value="">Select track...</option>
+          </select>
+        </div>
+
+        <!-- Key Transposition -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-400 mb-1">Transpose Key</label>
+          <select id="keySelect" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-brand-500">
+            <option value="">Original Key</option>
+            <option value="C">C Major</option>
+            <option value="G">G Major</option>
+            <option value="D">D Major</option>
+            <option value="A">A Major</option>
+            <option value="E">E Major</option>
+            <option value="B">B Major</option>
+            <option value="F">F Major</option>
+            <option value="Bb">B♭ Major</option>
+            <option value="Eb">E♭ Major</option>
+            <option value="Ab">A♭ Major</option>
+            <option value="Db">D♭ Major</option>
+            <option value="Gb">G♭ Major</option>
+          </select>
+        </div>
+
+        <!-- Title Override & Bars per line -->
+        <div class="grid grid-cols-3 gap-3">
+          <div class="col-span-2">
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Title</label>
+            <input type="text" id="titleInput" placeholder="Song Title" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-brand-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-400 mb-1">Bars/Line</label>
+            <input type="number" id="barsPerLine" value="4" min="1" max="16" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-brand-500" />
+          </div>
+        </div>
+
+        <!-- Chord Map Input -->
+        <div>
+          <div class="flex justify-between items-center mb-1">
+            <label class="text-xs font-semibold text-slate-400">Bar Chords Mapping</label>
+            <span class="text-[10px] text-slate-500">e.g. 1:G, 5:C, 9:D7</span>
+          </div>
+          <input type="text" id="chordsInput" placeholder="1:G, 4:C, 8:D7" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-brand-500 font-mono" />
+        </div>
+      </div>
+
+      <!-- Double stops & guitar string marks -->
+      <div class="bg-darkcard border border-darkborder rounded-xl p-5 shadow-sm">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="checkbox" id="dsInput" class="mt-0.5" />
+          <span class="text-xs text-slate-300">
+            <span class="font-semibold">Include double stops with guitar string marks</span><br>
+            <span class="text-slate-500">Writes every note of a beat as an ABC chord and adds !sN! string marks (1 = highest string) so TAB shows the fingering from the Guitar Pro file. Needs the patched abc.js to display them.</span>
+          </span>
+        </label>
+      </div>
+
+      <!-- Audio Synthesizer Controls Panel -->
+      <div id="audioControlsPanel" class="bg-darkcard border border-darkborder rounded-xl p-5 shadow-sm opacity-50 pointer-events-none transition space-y-3">
+        <h2 class="text-sm font-bold text-slate-200 uppercase tracking-wider flex items-center justify-between">
+          <span class="flex items-center gap-2"><i class="fa-solid fa-circle-play text-brand-500"></i> Audio Synthesizer</span>
+          <span id="audioStatus" class="text-[10px] text-slate-400 font-normal">Stopped</span>
+        </h2>
+
+        <div class="flex items-center gap-2">
+          <button id="btnPlay" class="flex-1 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-xs font-bold text-white transition flex items-center justify-center gap-1.5 shadow">
+            <i class="fa-solid fa-play"></i> Play
+          </button>
+          <button id="btnPause" disabled class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-bold text-slate-200 transition flex items-center justify-center gap-1.5 border border-slate-700">
+            <i class="fa-solid fa-pause"></i> Pause
+          </button>
+          <button id="btnStop" disabled class="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-xs font-bold text-slate-200 transition flex items-center justify-center gap-1.5 border border-slate-700">
+            <i class="fa-solid fa-stop"></i> Stop
+          </button>
+        </div>
+
+        <!-- Audio Progress Bar -->
+        <div class="space-y-1 pt-1">
+          <div class="flex justify-between text-[11px] font-mono text-slate-400">
+            <span id="timeCurrent">0:00</span>
+            <span id="timeTotal">0:00</span>
+          </div>
+          <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden border border-slate-800 cursor-pointer" id="progressContainer">
+            <div id="progressBar" class="bg-brand-500 h-full w-0 transition-all duration-100"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Right Panel: Viewports -->
+    <div class="lg:col-span-8 flex flex-col gap-4">
+
+      <!-- Navigation Tabs -->
+      <div class="flex items-center justify-between border-b border-darkborder pb-2">
+        <div class="flex space-x-2">
+          <button id="tabNotation" class="px-4 py-2 rounded-lg text-xs font-bold transition bg-brand-600 text-white shadow-md shadow-brand-600/20">
+            <i class="fa-solid fa-music mr-1.5"></i> Sheet Music & TAB
+          </button>
+          <button id="tabCode" class="px-4 py-2 rounded-lg text-xs font-bold transition bg-slate-800 text-slate-400 hover:text-slate-200">
+            <i class="fa-solid fa-code mr-1.5"></i> ABC Code Editor
+          </button>
+          <button id="tabAlignment" class="px-4 py-2 rounded-lg text-xs font-bold transition bg-slate-800 text-slate-400 hover:text-slate-200">
+            <i class="fa-solid fa-list-check mr-1.5"></i> Lyric Inspector
+          </button>
+        </div>
+        <div id="statusBadge" class="text-xs px-2.5 py-1 rounded-full bg-slate-800 text-slate-400 hidden">
+          Ready
+        </div>
+      </div>
+
+      <!-- Content Views -->
+
+      <!-- 1. Visual Sheet Music View -->
+      <div id="viewNotation" class="bg-darkcard border border-darkborder rounded-xl p-5 min-h-[500px] flex flex-col justify-center items-center overflow-auto">
+        <div id="notationPlaceholder" class="text-center text-slate-500">
+          <i class="fa-solid fa-sheet-music text-4xl mb-3 block text-slate-600"></i>
+          <p class="text-sm font-medium">Load a Guitar Pro file to render sheet music & TAB notation</p>
+        </div>
+        <div id="paper" class="w-full overflow-x-auto flex justify-center"></div>
+      </div>
+      <!-- Hidden target element for abcjs audio controller binding -->
+      <div id="abc-audio-target" class="hidden"></div>
+
+      <!-- 2. ABC Code Editor View -->
+      <div id="viewCode" class="bg-darkcard border border-darkborder rounded-xl p-4 hidden flex-1 flex-col">
+        <div class="flex justify-between items-center mb-2">
+          <span class="text-xs text-slate-400 font-mono">Editable ABC Stream</span>
+          <span class="text-[10px] text-slate-500">Changes will automatically update visual rendering</span>
+        </div>
+        <textarea id="abcEditor" class="w-full flex-1 min-h-[450px] bg-slate-900 border border-slate-700 rounded-lg p-3 text-sm text-brand-100 font-mono focus:outline-none focus:border-brand-500 leading-relaxed resize-y" placeholder="% ABC output will appear here..."></textarea>
+      </div>
+
+      <!-- 3. Beat Alignment Inspector View -->
+      <div id="viewAlignment" class="bg-darkcard border border-darkborder rounded-xl p-4 hidden overflow-x-auto">
+        <p class="text-xs text-slate-400 mb-3">Inspect individual note beats, pitch information, and mapped verse lyric syllables.</p>
+        <table class="w-full text-left text-xs text-slate-300 font-mono border-collapse">
+          <thead>
+            <tr class="bg-slate-900/80 text-slate-400 border-b border-darkborder">
+              <th class="p-2">Bar</th>
+              <th class="p-2">Beat</th>
+              <th class="p-2">Pitch (MIDI)</th>
+              <th class="p-2">Dur (1/16)</th>
+              <th class="p-2">Ties</th>
+              <th class="p-2">Lyrics Syllables</th>
+            </tr>
+          </thead>
+          <tbody id="alignmentTableBody" class="divide-y divide-slate-800">
+            <tr>
+              <td colspan="6" class="p-4 text-center text-slate-500">No score loaded</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-5 right-5 bg-slate-800 text-white text-xs font-semibold px-4 py-3 rounded-lg border border-slate-700 shadow-xl transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-2 pointer-events-none">
+    <i class="fa-solid fa-circle-info text-brand-500" id="toastIcon"></i>
+    <span id="toastMsg">Notification message</span>
+  </div>
+
+  <!-- Open Source Libraries & Licensing Modal -->
+  <div id="infoModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-darkcard border border-darkborder rounded-xl max-w-lg w-full p-6 shadow-2xl relative space-y-4" onclick="event.stopPropagation()">
+      <div class="flex justify-between items-center border-b border-darkborder pb-3">
+        <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
+          <i class="fa-solid fa-scale-balanced text-brand-500"></i> Open Source Licensing & Credits
+        </h3>
+        <button id="btnCloseInfo" class="text-slate-400 hover:text-slate-100 text-sm p-1 transition">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-400">
+        This converter runs entirely in your browser using the following open-source software libraries:
+      </p>
+
+      <div class="space-y-3 max-h-80 overflow-y-auto pr-1 text-xs">
+        <div class="p-3 bg-slate-900/60 rounded-lg border border-slate-800 flex justify-between items-start">
+          <div>
+            <div class="flex items-center gap-2">
+              <a href="https://www.alphatab.net" target="_blank" rel="noopener noreferrer" class="font-bold text-slate-200 hover:text-brand-400 transition underline flex items-center gap-1">
+                alphaTab <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-500"></i>
+              </a>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-0.5">Cross-platform musical notation and tablature rendering engine for Guitar Pro, MusicXML, Capella & alphaTex files.</div>
+          </div>
+          <span class="px-2 py-0.5 bg-indigo-900/50 text-indigo-300 rounded text-[10px] font-mono border border-indigo-700/50 ml-2 whitespace-nowrap">MPL-2.0 / LGPL</span>
+        </div>
+
+        <div class="p-3 bg-slate-900/60 rounded-lg border border-slate-800 flex justify-between items-start">
+          <div>
+            <div class="flex items-center gap-2">
+              <a href="https://www.abcjs.net" target="_blank" rel="noopener noreferrer" class="font-bold text-slate-200 hover:text-brand-400 transition underline flex items-center gap-1">
+                abcjs <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-500"></i>
+              </a>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-0.5">Sheet music rendering engine and WebAudio sound synthesizer for ABC Notation.</div>
+          </div>
+          <span class="px-2 py-0.5 bg-emerald-900/50 text-emerald-300 rounded text-[10px] font-mono border border-emerald-700/50 ml-2 whitespace-nowrap">MIT</span>
+        </div>
+
+        <div class="p-3 bg-slate-900/60 rounded-lg border border-slate-800 flex justify-between items-start">
+          <div>
+            <div class="flex items-center gap-2">
+              <a href="https://stuk.github.io/jszip/" target="_blank" rel="noopener noreferrer" class="font-bold text-slate-200 hover:text-brand-400 transition underline flex items-center gap-1">
+                JSZip <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-500"></i>
+              </a>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-0.5">Archive utility used to unpack modern Guitar Pro ZIP structures (.gp / .gpif).</div>
+          </div>
+          <span class="px-2 py-0.5 bg-emerald-900/50 text-emerald-300 rounded text-[10px] font-mono border border-emerald-700/50 ml-2 whitespace-nowrap">MIT</span>
+        </div>
+
+        <div class="p-3 bg-slate-900/60 rounded-lg border border-slate-800 flex justify-between items-start">
+          <div>
+            <div class="flex items-center gap-2">
+              <a href="https://tailwindcss.com" target="_blank" rel="noopener noreferrer" class="font-bold text-slate-200 hover:text-brand-400 transition underline flex items-center gap-1">
+                Tailwind CSS <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-500"></i>
+              </a>
+              <span class="text-slate-600">&</span>
+              <a href="https://fontawesome.com" target="_blank" rel="noopener noreferrer" class="font-bold text-slate-200 hover:text-brand-400 transition underline flex items-center gap-1">
+                FontAwesome <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-500"></i>
+              </a>
+            </div>
+            <div class="text-[11px] text-slate-400 mt-0.5">UI styling framework and iconography.</div>
+          </div>
+          <span class="px-2 py-0.5 bg-emerald-900/50 text-emerald-300 rounded text-[10px] font-mono border border-emerald-700/50 ml-2 whitespace-nowrap">MIT / OFL</span>
+        </div>
+      </div>
+
+      <div class="pt-2 border-t border-darkborder flex justify-end">
+        <button id="btnCloseInfoBtn" class="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 transition border border-slate-700">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript Application Logic -->
+  <script>
+    const DUR16 = { "Whole": 16, "Half": 8, "Quarter": 4, "Eighth": 2, "16th": 1 };
+    const KEY_NAME = {
+      0: "C", 1: "G", 2: "D", 3: "A", 4: "E", 5: "B", 6: "F#", 7: "C#",
+      "-1": "F", "-2": "Bb", "-3": "Eb", "-4": "Ab", "-5": "Db", "-6": "Gb"
+    };
+    const SHARP_ORDER = "FCGDAEB";
+    const FLAT_ORDER = "BEADGCF";
+
+    let parsedScoreData = null;
+    // Android import: write every note of a beat as an ABC chord, with !sN! string marks. Set false for the old behaviour.
+    const ANDROID_DOUBLE_STOPS = true;
+    let currentAbcString = "";
+    let isLegacyFormat = false;
+    let visualObj = null;
+    let audioContext = null;
+    let synthControl = null;
+    let synthCreate = null;
+    let timingCallbacks = null;
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileInfo = document.getElementById('fileInfo');
+    const fileName = document.getElementById('fileName');
+    const settingsPanel = document.getElementById('settingsPanel');
+    const audioControlsPanel = document.getElementById('audioControlsPanel');
+    const trackSelect = document.getElementById('trackSelect');
+    const keySelect = document.getElementById('keySelect');
+    const titleInput = document.getElementById('titleInput');
+    const barsPerLineInput = document.getElementById('barsPerLine');
+    const chordsInput = document.getElementById('chordsInput');
+    const dsInput = document.getElementById('dsInput');
+    const abcEditor = document.getElementById('abcEditor');
+    const paper = document.getElementById('paper');
+    const notationPlaceholder = document.getElementById('notationPlaceholder');
+    const alignmentTableBody = document.getElementById('alignmentTableBody');
+
+    const btnPlay = document.getElementById('btnPlay');
+    const btnPause = document.getElementById('btnPause');
+    const btnStop = document.getElementById('btnStop');
+    const audioStatus = document.getElementById('audioStatus');
+    const timeCurrent = document.getElementById('timeCurrent');
+    const timeTotal = document.getElementById('timeTotal');
+    const progressBar = document.getElementById('progressBar');
+    const progressContainer = document.getElementById('progressContainer');
+
+    const btnCopyAbc = document.getElementById('btnCopyAbc');
+    const btnDownloadAbc = document.getElementById('btnDownloadAbc');
+
+    const tabNotation = document.getElementById('tabNotation');
+    const tabCode = document.getElementById('tabCode');
+    const tabAlignment = document.getElementById('tabAlignment');
+    const viewNotation = document.getElementById('viewNotation');
+    const viewCode = document.getElementById('viewCode');
+    const viewAlignment = document.getElementById('viewAlignment');
+
+    const btnInfo = document.getElementById('btnInfo');
+    const infoModal = document.getElementById('infoModal');
+    const btnCloseInfo = document.getElementById('btnCloseInfo');
+    const btnCloseInfoBtn = document.getElementById('btnCloseInfoBtn');
+
+    if (btnInfo && infoModal) {
+      btnInfo.addEventListener('click', () => infoModal.classList.remove('hidden'));
+      [btnCloseInfo, btnCloseInfoBtn].forEach(b => {
+        if (b) b.addEventListener('click', () => infoModal.classList.add('hidden'));
+      });
+      // Close modal when clicking anywhere on the background overlay
+      infoModal.addEventListener('click', () => infoModal.classList.add('hidden'));
+    }
+
+    function ids(text) {
+      if (!text) return [];
+      return text.trim().split(/\s+/).map(x => parseInt(x, 10)).filter(n => !isNaN(n));
+    }
+
+    function formatTime(seconds) {
+      const s = Math.floor(seconds || 0);
+      const m = Math.floor(s / 60);
+      const secs = s % 60;
+      return `${m}:${secs < 10 ? '0' : ''}${secs}`;
+    }
+
+    function showToast(msg, icon = 'fa-circle-info') {
+      const toast = document.getElementById('toast');
+      const toastMsg = document.getElementById('toastMsg');
+      const toastIcon = document.getElementById('toastIcon');
+      toastMsg.innerText = msg;
+      toastIcon.className = `fa-solid ${icon} text-brand-500`;
+      toast.classList.remove('translate-y-20', 'opacity-0');
+      setTimeout(() => {
+        toast.classList.add('translate-y-20', 'opacity-0');
+      }, 3000);
+    }
+
+    // --- Python Syllable & Lyric Tokenization Logic Port ---
+    function word_parts(parts) {
+      const hasVowel = x => /[aeiouyAEIOUY]/.test(x);
+      let out = [];
+      let pending = [];
+
+      for (let i = 0; i < parts.length; i++) {
+        let part = parts[i];
+        if (!hasVowel(part)) {
+          const remainingHasVowel = parts.slice(i).some(x => hasVowel(x));
+          if (out.length > 0 && !remainingHasVowel) {
+            let lastRealIdx = -1;
+            for (let k = out.length - 1; k >= 0; k--) {
+              if (out[k] !== "_") { lastRealIdx = k; break; }
+            }
+            if (lastRealIdx !== -1) {
+              out[lastRealIdx] += part;
+            } else {
+              out.push(part);
+            }
+            out.push("_");
+          } else {
+            pending.push(part);
+          }
+          continue;
+        }
+
+        let syl = pending.join("") + part;
+        if (pending.length > 0) {
+          out.push(syl);
+          for (let p = 0; p < pending.length; p++) out.push("_");
+        } else {
+          out.push(syl);
+        }
+        pending = [];
+      }
+
+      for (let p = 0; p < pending.length; p++) out.push("_");
+
+      let realIndices = [];
+      for (let i = 0; i < out.length; i++) {
+        if (out[i] !== "_") realIndices.push(i);
+      }
+
+      for (let i = 0; i < realIndices.length - 1; i++) {
+        out[realIndices[i]] += "-";
+      }
+
+      return out;
+    }
+
+    function syllables(text) {
+      text = text.replace(/\r/g, "").replace(/\n/g, " ").replace(/\u2019/g, "'").replace(/\ufffd/g, "'");
+      let toks = [];
+      let words = text.split(" ");
+
+      for (let w of words) {
+        if (w === "") {
+          toks.push("");
+          continue;
+        }
+        let parts = w.split("-");
+        if (parts[parts.length - 1] === "" && parts.length > 1) {
+          parts.pop();
+        }
+        let piece = parts.length > 1 ? word_parts(parts) : parts;
+
+        if (w.endsWith("-")) {
+          let lastRealIdx = -1;
+          for (let k = piece.length - 1; k >= 0; k--) {
+            if (piece[k] !== "_") { lastRealIdx = k; break; }
+          }
+          if (lastRealIdx !== -1 && !piece[lastRealIdx].endsWith("-")) {
+            piece[lastRealIdx] += "-";
+          }
+        }
+        toks.push(...piece);
+      }
+      return toks;
+    }
+
+    // Function callable directly by Android WebView
+    window.convertFileForAndroid = async function(base64Data, fileName) {
+      try { // 1. Convert base64 from Android back to ArrayBuffer
+        const binary = atob(base64Data);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+        // 2. Reuse your existing web app parsing logic
+        const ext = fileName.split('.').pop().toLowerCase();
+        if (ext === 'gp') {
+          parsedScoreData = await parseGpFile(bytes.buffer);
+        } else {
+          parsedScoreData = parseLegacyGpFile(bytes.buffer);
+        }
+
+        //3. Convert Melody/First track to ABC
+        const melodyIdx = parsedScoreData.tracks.findIndex(t => (t.name || '').toLowerCase().includes('melody'));
+        const trackIndex = melodyIdx !== -1 ? melodyIdx : 0;
+        const result = convertToAbc(parsedScoreData, trackIndex, { doubleStops: ANDROID_DOUBLE_STOPS, stringMarks: ANDROID_DOUBLE_STOPS });
+
+        // 4. Send ABC string back to Android
+        if (window.AndroidBridge) {
+          window.AndroidBridge.onAbcExtracted(result.abc);
+        }
+        return result.abc;
+      } catch (err) {
+        if (window.AndroidBridge) {
+          window.AndroidBridge.onError(err.toString());
+        }
+      }
+    };
+
+    // --- GP Zip & XML Parser ---
+    async function parseGpFile(fileBuffer) {
+      const zip = await JSZip.loadAsync(fileBuffer);
+      const scoreFile = zip.file("Content/score.gpif");
+      if (!scoreFile) {
+        throw new Error("Invalid GP file: Missing Content/score.gpif");
+      }
+      const xmlText = await scoreFile.async("text");
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+
+      // Extract tracks
+      const trackNodes = Array.from(xmlDoc.querySelectorAll("Tracks > Track"));
+      const tracks = trackNodes.map((t, idx) => ({
+        id: idx,
+        name: (t.querySelector("Name")?.textContent || "").trim() || `Track ${idx + 1}`,
+        node: t
+      }));
+
+      // Extract Title & Tempo
+      const title = xmlDoc.querySelector("Score > Title")?.textContent || "Melody";
+      let tempo = null;
+      const automations = Array.from(xmlDoc.querySelectorAll("MasterTrack > Automations > Automation"));
+      for (let auto of automations) {
+        if (auto.querySelector("Type")?.textContent === "Tempo") {
+          const val = auto.querySelector("Value")?.textContent || "";
+          tempo = parseInt(parseFloat(val.split(" ")[0]), 10);
+          break;
+        }
+      }
+
+      // Index entities by ID
+      const makeMap = (tagName) => {
+        const map = new Map();
+        xmlDoc.querySelectorAll(`${tagName}s > ${tagName}`).forEach(el => {
+          map.set(parseInt(el.getAttribute("id"), 10), el);
+        });
+        return map;
+      };
+
+      const barsMap = makeMap("Bar");
+      const voicesMap = makeMap("Voice");
+      const beatsMap = makeMap("Beat");
+      const notesMap = makeMap("Note");
+      const rhythmsMap = makeMap("Rhythm");
+      const masterBars = Array.from(xmlDoc.querySelectorAll("MasterBars > MasterBar"));
+
+      return {
+        xmlDoc,
+        tracks,
+        title,
+        tempo,
+        barsMap,
+        voicesMap,
+        beatsMap,
+        notesMap,
+        rhythmsMap,
+        masterBars
+      };
+    }
+
+    // --- Legacy GP3 / GP4 / GP5 Parser using alphaTab ---
+    function parseLegacyGpFile(fileBuffer) {
+      const bytes = new Uint8Array(fileBuffer);
+      const score = alphaTab.importer.ScoreLoader.loadScoreFromBytes(bytes);
+
+      if (!score) {
+        throw new Error("Unable to parse legacy Guitar Pro file with alphaTab.");
+      }
+
+      const tracks = score.tracks.map((t, idx) => ({
+        id: idx,
+        name: (t.name || "").trim() || `Track ${idx + 1}`,
+        rawTrack: t
+      }));
+
+      return {
+        isLegacy: true,
+        title: score.title || "Melody",
+        tempo: score.tempo || 120,
+        tracks,
+        score
+      };
+    }
+
+    // --- Audio Player Initialization ---
+    async function initAudioController() {
+      stopAudio();
+      if (!visualObj || !visualObj[0]) return;
+
+      if (!ABCJS.synth.supportsAudio()) {
+        showToast("WebAudio synthesizer is not supported by your browser", "fa-triangle-exclamation");
+        return;
+      }
+
+      try {
+        if (!audioContext) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          audioContext = new AudioContextClass();
+        }
+        if (audioContext.state === "suspended") {
+          await audioContext.resume();
+        }
+
+        const audioTarget = document.getElementById("abc-audio-target");
+        if (!synthControl) {
+          synthControl = new ABCJS.synth.SynthController();
+          synthControl.load(audioTarget, null, {
+            displayLoop: false,
+            displayRestart: false,
+            displayPlay: false,
+            displayProgress: false,
+            displayWarp: false
+          });
+        }
+
+        await synthControl.setTune(visualObj[0], false, {
+          audioContext: audioContext,
+          soundFontUrl: "https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/"
+        });
+
+        // Initialize progress total duration display
+        if (visualObj[0].totalDuration) {
+          timeTotal.innerText = formatTime(visualObj[0].totalDuration);
+        }
+
+        audioStatus.innerText = "Ready";
+      } catch (err) {
+        console.warn("Audio controller notice:", err);
+      }
+    }
+
+    function stopAudio() {
+      if (synthControl) {
+        try { synthControl.pause(); } catch(e){}
+      }
+      if (timingCallbacks) {
+        try { timingCallbacks.stop(); } catch(e){}
+      }
+      document.querySelectorAll('.abcjs-highlight').forEach(el => el.classList.remove('abcjs-highlight'));
+      audioStatus.innerText = "Stopped";
+      btnPlay.innerHTML = `<i class="fa-solid fa-play"></i> Play`;
+      btnPause.disabled = true;
+      btnStop.disabled = true;
+      progressBar.style.width = "0%";
+      timeCurrent.innerText = "0:00";
+    }
+
+    btnPlay.addEventListener('click', async () => {
+      if (!visualObj || !visualObj[0] || !synthControl) return;
+
+      try {
+        if (audioContext && audioContext.state === 'suspended') {
+          await audioContext.resume();
+        }
+
+        synthControl.play();
+        audioStatus.innerText = "Playing";
+        btnPlay.innerHTML = `<i class="fa-solid fa-play"></i> Playing`;
+        btnPause.disabled = false;
+        btnStop.disabled = false;
+
+        if (!timingCallbacks) {
+          timingCallbacks = new ABCJS.TimingCallbacks(visualObj[0], {
+            eventCallback: (ev) => {
+              if (!ev) return;
+              if (ev.elements) {
+                document.querySelectorAll('.abcjs-highlight').forEach(el => el.classList.remove('abcjs-highlight'));
+                ev.elements.forEach(paths => {
+                  paths.forEach(p => p.classList.add('abcjs-highlight'));
+                });
+              }
+              if (ev.milliseconds && visualObj[0].totalDuration) {
+                const totalMs = visualObj[0].totalDuration * 1000;
+                const pct = Math.min(100, (ev.milliseconds / totalMs) * 100);
+                progressBar.style.width = `${pct}%`;
+                timeCurrent.innerText = formatTime(ev.milliseconds / 1000);
+              }
+            }
+          });
+        }
+        timingCallbacks.start();
+      } catch (e) {
+        console.error("Playback start error:", e);
+      }
+    });
+
+    btnPause.addEventListener('click', () => {
+      if (synthControl) {
+        synthControl.pause();
+      }
+      if (timingCallbacks) {
+        timingCallbacks.pause();
+      }
+      audioStatus.innerText = "Paused";
+      btnPlay.innerHTML = `<i class="fa-solid fa-play"></i> Resume`;
+    });
+
+    btnStop.addEventListener('click', () => {
+      stopAudio();
+    });
+
+    progressContainer.addEventListener('click', (e) => {
+      if (!visualObj || !visualObj[0] || !synthControl || !visualObj[0].totalDuration) return;
+      const rect = progressContainer.getBoundingClientRect();
+      const clickX = e.clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, clickX / rect.width));
+      progressBar.style.width = `${pct * 100}%`;
+      timeCurrent.innerText = formatTime(pct * visualObj[0].totalDuration);
+
+      if (synthControl.seek) {
+        synthControl.seek(pct);
+      }
+    });
+
+    // --- Map the importer's string number to guitarist numbering (1 = highest string) ---
+    // raw: importer string value, base: its first index (0 for .gp XML, 1 for alphaTab),
+    // tuningLow: open-string MIDI pitches, lowest string first. Both counting directions are
+    // checked against the note's fret, so the result does not depend on a guess about direction.
+    function resolveStringNumber(raw, base, midi, fret, tuningLow) {
+      if (raw === undefined || raw === null || isNaN(raw)) return null;
+      const n = tuningLow && tuningLow.length ? tuningLow.length : 6;
+      const idx = raw - base;
+      if (idx < 0 || idx >= n) return null;
+      const cands = [n - idx, idx + 1];               // counted from lowest, counted from highest
+      if (!tuningLow || tuningLow.length !== n || fret === undefined || isNaN(fret)) return cands[0];
+      const diff = s => midi - tuningLow[n - s] - fret; // 0 when consistent (no capo)
+      for (const s of cands) if (diff(s) === 0) return s;
+      for (const s of cands) if (diff(s) >= 0 && diff(s) <= 12) return s; // capo
+      console.warn("GP2ABC: string/fret/tuning disagree for a note; no string mark written");
+      return null;
+    }
+
+    // --- Extract Bars Data for Selected Track (Legacy Format) ---
+    function extractLegacyTrackBars(data, trackIndex) {
+      const track = data.tracks[trackIndex].rawTrack;
+      const lyrics = [];
+      if (track.lyrics && track.lyrics.lines) {
+        track.lyrics.lines.forEach(line => {
+          if (line.text && line.text.trim()) lyrics.push(line.text.trim());
+        });
+      }
+
+      const outBars = [];
+      const staff = track.staves[0];
+      if (!staff) return { lyrics, bars: [] };
+      // alphaTab keeps tuning highest string first
+      const tuningLow = (staff.tuning && staff.tuning.length) ? staff.tuning.slice().reverse() : null;
+
+      staff.bars.forEach((bar, barIdx) => {
+        const masterBar = data.score.masterBars[barIdx];
+        const timeSig = `${masterBar.timeSignatureNumerator}/${masterBar.timeSignatureDenominator}`;
+        const fifths = masterBar.keySignature || 0;
+
+        const beatList = [];
+        bar.voices.forEach((voice, vIdx) => {
+          if (vIdx > 0 && voice.beats.length === 0) return;
+
+          voice.beats.forEach(beat => {
+            let d = 16 / beat.duration;
+            if (beat.dots === 1) d = d * 1.5;
+            else if (beat.dots === 2) d = d * 1.75;
+
+            if (beat.tupletNumerator && beat.tupletDenominator) {
+              d = (d * beat.tupletDenominator) / beat.tupletNumerator;
+            }
+
+            const item = {
+              d,
+              rest: beat.isEmpty || beat.isRest || beat.notes.length === 0,
+              tie_in: false,
+              tie_out: false
+            };
+
+            if (!item.rest && beat.notes.length > 0) {
+              item.notes = beat.notes.map(note => ({
+                midi: note.realValue,
+                str: note.string >= 1 ? resolveStringNumber(note.string, 1, note.realValue, note.fret, tuningLow) : null,
+                tie_in: !!note.isTieDestination,
+                tie_out: !!note.tieOrigin
+              }));
+              item.midi = item.notes[0].midi;
+              item.tie_in = item.notes[0].tie_in;
+              item.tie_out = item.notes[0].tie_out;
+            }
+            beatList.push(item);
+          });
+        });
+
+        outBars.push({ time: timeSig, fifths, beats: beatList });
+      });
+
+      return { lyrics, bars: outBars };
+    }
+
+    // --- Extract Bars Data for Selected Track ---
+    function extractTrackBars(data, trackIndex) {
+      if (data.isLegacy) {
+        return extractLegacyTrackBars(data, trackIndex);
+      }
+      const trackNode = data.tracks[trackIndex].node;
+      const lyrics = Array.from(trackNode.querySelectorAll("Lyrics > Line"))
+                          .map(l => l.querySelector("Text")?.textContent || "");
+
+      // Open-string pitches, lowest string first (e.g. "40 45 50 55 59 64")
+      const tuningProp = Array.from(trackNode.querySelectorAll("Staves Staff Properties Property"))
+                              .find(p => p.getAttribute("name") === "Tuning");
+      const tuningParsed = tuningProp
+        ? (tuningProp.querySelector("Pitches")?.textContent || "").trim().split(/\s+/).map(Number).filter(v => !isNaN(v))
+        : [];
+      const tuningLow = tuningParsed.length ? tuningParsed : null;
+
+      const outBars = [];
+      for (let mb of data.masterBars) {
+        const barIds = ids(mb.querySelector("Bars")?.textContent);
+        const barId = barIds[trackIndex];
+        const bar = data.barsMap.get(barId);
+
+        const fifths = parseInt(mb.querySelector("Key > AccidentalCount")?.textContent || "0", 10);
+        const timeSig = mb.querySelector("Time")?.textContent || "4/4";
+        const beatList = [];
+
+        if (bar) {
+          const voiceIds = ids(bar.querySelector("Voices")?.textContent);
+          const vId = voiceIds[0];
+          const voice = vId !== undefined ? data.voicesMap.get(vId) : null;
+          const beatIds = voice ? ids(voice.querySelector("Beats")?.textContent) : [];
+
+          for (let bId of beatIds) {
+            const beat = data.beatsMap.get(bId);
+            if (!beat) continue;
+
+            const rhythmRef = parseInt(beat.querySelector("Rhythm")?.getAttribute("ref"), 10);
+            const rhythm = data.rhythmsMap.get(rhythmRef);
+
+            let d = DUR16[rhythm?.querySelector("NoteValue")?.textContent || "Quarter"] || 4;
+            const dot = rhythm?.querySelector("AugmentationDot");
+            if (dot) {
+              d = dot.getAttribute("count") === "1" ? Math.floor(d * 1.5) : (d * 1.75);
+            }
+            const tup = rhythm?.querySelector("PrimaryTuplet");
+            if (tup) {
+              d = (d * parseInt(tup.getAttribute("den"), 10)) / parseInt(tup.getAttribute("num"), 10);
+            }
+
+            const noteIds = ids(beat.querySelector("Notes")?.textContent);
+            const item = { d, rest: noteIds.length === 0, tie_in: false, tie_out: false };
+
+            const notes = [];
+            for (const nid of noteIds) {
+              const note = data.notesMap.get(nid);
+              if (!note) continue;
+              const props = Array.from(note.querySelectorAll("Properties > Property"));
+              const prop = nm => props.find(p => p.getAttribute("name") === nm);
+              const midiProp = prop("Midi");
+              if (!midiProp) continue;
+              const midi = parseInt(midiProp.querySelector("Number")?.textContent || "60", 10);
+              const rawStr = prop("String")?.querySelector("String")?.textContent;
+              const rawFret = prop("Fret")?.querySelector("Fret")?.textContent;
+              const tie = note.querySelector("Tie");
+              notes.push({
+                midi,
+                str: rawStr !== undefined ? resolveStringNumber(parseInt(rawStr, 10), 0, midi, parseInt(rawFret, 10), tuningLow) : null,
+                tie_in: tie ? tie.getAttribute("destination") === "true" : false,
+                tie_out: tie ? tie.getAttribute("origin") === "true" : false
+              });
+            }
+            if (notes.length > 0) {
+              item.notes = notes;
+              item.midi = notes[0].midi;
+              item.tie_in = notes[0].tie_in;
+              item.tie_out = notes[0].tie_out;
+            }
+            beatList.push(item);
+          }
+        }
+        outBars.push({ time: timeSig, fifths, beats: beatList });
+      }
+
+      return { lyrics, bars: outBars };
+    }
+
+    // options: keyOverride, titleOverride, barsPerLine, chordsMap (chord symbols),
+    //          doubleStops (write every note of a beat as an ABC chord instead of the first note only),
+    //          stringMarks (with doubleStops: write !sN! string marks before each chord note)
+    function convertToAbc(data, trackIndex, options = {}) {
+      const { keyOverride, titleOverride, barsPerLine = 4, chordsMap = {}, doubleStops = false, stringMarks = false } = options;
+      const { lyrics, bars } = extractTrackBars(data, trackIndex);
+
+      if (bars.length === 0) return { abc: "% No bars found in track", parsedBars: [] };
+
+      // Normalise: every pitched beat gets notes[]; first note only unless doubleStops is on
+      bars.forEach(b => b.beats.forEach(x => {
+        if (x.rest) return;
+        if (!x.notes || x.notes.length === 0) {
+          if (x.midi === undefined) { x.rest = true; return; }
+          x.notes = [{ midi: x.midi, str: null, tie_in: x.tie_in, tie_out: x.tie_out }];
+        }
+        if (!doubleStops) x.notes = x.notes.slice(0, 1);
+        x.midi = x.notes[0].midi;
+      }));
+
+      let time0 = bars[0].time;
+      let fifths0 = bars[0].fifths;
+
+      if (fifths0 === 0) {
+        const pcs = [];
+        bars.forEach(b => b.beats.forEach(x => { if (!x.rest) x.notes.forEach(nn => pcs.push(nn.midi % 12)); }));
+        const major = new Set([0, 2, 4, 5, 7, 9, 11]);
+
+        let bestF = 0;
+        let bestScore = -1;
+        for (let f = -6; f <= 7; f++) {
+          let score = 0;
+          pcs.forEach(pc => { if (major.has((pc - 7 * f + 1200) % 12)) score++; });
+          const endsOnKey = pcs.length > 0 && pcs[pcs.length - 1] === ((7 * f) % 12 + 12) % 12;
+          if (endsOnKey) score += 0.5;
+          score -= Math.abs(f) * 0.01;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestF = f;
+          }
+        }
+        fifths0 = bestF;
+      }
+
+      if (keyOverride && keyOverride in KEY_NAME_REVERSE) {
+        const want = KEY_NAME_REVERSE[keyOverride];
+        const shift = (((7 * want) % 12 - (7 * fifths0) % 12 + 6) % 12 + 12) % 12 - 6;
+        bars.forEach(b => b.beats.forEach(x => {
+          if (x.rest) return;
+          x.notes.forEach(nn => { nn.midi += shift; });   // string marks stay: the fret moves with the shift
+          x.midi = x.notes[0].midi;
+        }));
+        fifths0 = want;
+      }
+
+      const names = fifths0 >= 0
+        ? ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        : ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+
+      bars.forEach(b => b.beats.forEach(x => {
+        if (x.rest) return;
+        x.notes.forEach(nn => {
+          const nm = names[nn.midi % 12];
+          nn.step = nm[0];
+          nn.acc = nm.slice(1);
+          nn.octave = Math.floor(nn.midi / 12) - 1;
+        });
+        x.step = x.notes[0].step;   // kept for the Lyric Inspector table
+        x.acc = x.notes[0].acc;
+        x.octave = x.notes[0].octave;
+      }));
+
+      const keyAlters = {};
+      if (fifths0 >= 0) {
+        for (let i = 0; i < fifths0; i++) keyAlters[SHARP_ORDER[i]] = 1;
+      } else {
+        for (let i = 0; i < -fifths0; i++) keyAlters[FLAT_ORDER[i]] = -1;
+      }
+
+      const sung = [];
+      bars.forEach((b, bi) => {
+        b.beats.forEach((x, k) => {
+          if (!x.rest) sung.push({ bi, k });
+        });
+      });
+
+      const verses = [];
+      lyrics.forEach(text => {
+        const toks = syllables(text);
+        if (!toks.some(t => t !== "")) return;
+        const slot = new Map();
+        sung.forEach((s, idx) => {
+          if (idx < toks.length) slot.set(`${s.bi},${s.k}`, toks[idx]);
+        });
+        verses.push(slot);
+      });
+
+      const lines = [];
+      let music = [];
+      let words = verses.map(() => []);
+      let n = 0;
+
+      bars.forEach((b, bi) => {
+        const state = { ...keyAlters };
+        b.beats.forEach((x, k) => {
+          const barNum = bi + 1;
+          const tok = (chordsMap[barNum] && k === 0) ? `"${chordsMap[barNum]}"` : "";
+          const d = x.d;
+          const ds = d === 1 ? "" : (Number.isInteger(d) ? String(d) : `${Math.round(d * 2)}/2`);
+
+          if (x.rest) {
+            music.push(tok + "z" + ds);
+            return;
+          }
+
+          const multi = x.notes.length > 1;
+          const noteText = nn => {
+            const alt = { "#": 1, "b": -1, "": 0 }[nn.acc] || 0;
+            let acc = "";
+            if ((state[nn.step] || 0) !== alt) {
+              acc = { 1: "^", "-1": "_", 0: "=" }[alt];
+              state[nn.step] = alt;
+            }
+            const o = nn.octave + 1;
+            const p = o >= 5 ? nn.step.toLowerCase() + "'".repeat(o - 5)
+                             : nn.step + ",".repeat(Math.max(0, 4 - o));
+            const mark = (multi && stringMarks && nn.str) ? `!s${nn.str}!` : "";
+            return { head: mark + acc + p, tie: nn.tie_out ? "-" : "" };
+          };
+
+          if (!multi) {
+            const t = noteText(x.notes[0]);
+            music.push(tok + t.head + ds + t.tie);
+          } else {
+            const parts = x.notes.map(nn => { const t = noteText(nn); return t.head + t.tie; });
+            music.push(tok + "[" + parts.join("") + "]" + ds);
+          }
+
+          verses.forEach((v, vi) => {
+            const t = v.get(`${bi},${k}`) || "";
+            words[vi].push((t === "_" || (!t && x.notes[0].tie_in)) ? "_" : (t ? t : "*"));
+          });
+        });
+
+        music.push("|");
+        n++;
+        if (n === barsPerLine) {
+          lines.push({ music: music.join(" "), words: words });
+          music = [];
+          words = verses.map(() => []);
+          n = 0;
+        }
+      });
+
+      if (music.length > 0) {
+        lines.push({ music: music.join(" "), words: words });
+      }
+
+      const out = [
+        "X:1",
+        `T:${titleOverride || data.title}`,
+        `M:${time0}`,
+        "L:1/16"
+      ];
+      if (data.tempo) out.push(`Q:1/4=${data.tempo}`);
+      out.push(`K:${KEY_NAME[fifths0] || "C"}`);
+
+      lines.forEach(({ music, words }) => {
+        out.push(music);
+        words.forEach(w => {
+          if (w.some(t => t !== "*")) {
+            let text = "";
+            w.forEach(t => {
+              text += (!text || text.endsWith("-")) ? t : (" " + t);
+            });
+            out.push("w: " + text);
+          }
+        });
+      });
+
+      return {
+        abc: out.join("\n") + "\n",
+        bars,
+        sung,
+        verses
+      };
+    }
+
+    const KEY_NAME_REVERSE = Object.entries(KEY_NAME).reduce((acc, [k, v]) => {
+      acc[v] = parseInt(k, 10);
+      return acc;
+    }, {});
+
+    function updateRender() {
+      if (!parsedScoreData) return;
+
+      const trackIndex = parseInt(trackSelect.value, 10) || 0;
+      const keyOverride = keySelect.value;
+      const titleOverride = titleInput.value.trim();
+      const barsPerLine = parseInt(barsPerLineInput.value, 10) || 4;
+
+      const chordsMap = {};
+      if (chordsInput.value.trim()) {
+        chordsInput.value.split(',').forEach(item => {
+          const parts = item.split(':');
+          if (parts.length === 2) {
+            const b = parseInt(parts[0].trim(), 10);
+            const c = parts[1].trim();
+            if (!isNaN(b) && c) chordsMap[b] = c;
+          }
+        });
+      }
+
+      const result = convertToAbc(parsedScoreData, trackIndex, {
+        doubleStops: dsInput.checked,
+        stringMarks: dsInput.checked,
+        keyOverride,
+        titleOverride,
+        barsPerLine,
+        chordsMap
+      });
+
+      currentAbcString = result.abc;
+      abcEditor.value = currentAbcString;
+
+      notationPlaceholder.classList.add('hidden');
+      paper.innerHTML = "";
+      visualObj = ABCJS.renderAbc("paper", currentAbcString, {
+        responsive: "resize",
+        tablature: [{ instrument: "guitar" }],
+        add_classes: true,
+        foregroundColor: "#0f172a",
+        selectionColor: "#22c55e"
+      });
+
+      renderAlignmentTable(result);
+
+      btnCopyAbc.disabled = false;
+      btnDownloadAbc.disabled = false;
+      settingsPanel.classList.remove('opacity-50', 'pointer-events-none');
+      audioControlsPanel.classList.remove('opacity-50', 'pointer-events-none');
+
+      initAudioController();
+    }
+
+    function renderAlignmentTable(result) {
+      if (!result || !result.bars) return;
+
+      let html = "";
+      result.bars.forEach((b, bi) => {
+        b.beats.forEach((x, k) => {
+          const pitch = x.rest ? "Rest (z)" : `${x.step}${x.acc}${x.octave} (MIDI ${x.midi})`;
+          const ties = [x.tie_in ? "In" : "", x.tie_out ? "Out" : ""].filter(Boolean).join("/") || "-";
+
+          let lyricsCell = "";
+          if (result.verses) {
+            lyricsCell = result.verses.map(v => v.get(`${bi},${k}`) || "-").join(" | ");
+          }
+
+          html += `
+            <tr class="hover:bg-slate-800/50">
+              <td class="p-2 text-slate-400 font-bold">${bi + 1}</td>
+              <td class="p-2 text-slate-400">${k + 1}</td>
+              <td class="p-2 ${x.rest ? 'text-slate-500' : 'text-brand-500 font-semibold'}">${pitch}</td>
+              <td class="p-2 text-slate-300">${x.d}</td>
+              <td class="p-2 text-slate-400">${ties}</td>
+              <td class="p-2 text-slate-200 font-semibold">${lyricsCell}</td>
+            </tr>
+          `;
+        });
+      });
+      alignmentTableBody.innerHTML = html || '<tr><td colspan="6" class="p-4 text-center">No notes found</td></tr>';
+    }
+
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        fileName.innerText = file.name;
+        fileInfo.classList.remove('hidden');
+
+        const ext = file.name.split('.').pop().toLowerCase();
+
+        // Direct alphaTab pipeline for alphaTex text files
+        if (ext === 'tex' || ext === 'txt') {
+          const text = await file.text();
+          const score = alphaTab.importer.ScoreLoader.loadScoreFromTex(text);
+          if (!score) throw new Error("Could not parse alphaTex string");
+          parsedScoreData = {
+            isLegacy: true,
+            title: score.title || "Melody",
+            tempo: score.tempo || 120,
+            tracks: score.tracks.map((t, idx) => ({ id: idx, name: t.name || `Track ${idx + 1}`, rawTrack: t })),
+            score
+          };
+          isLegacyFormat = true;
+        } else {
+          const arrayBuffer = await file.arrayBuffer();
+
+          // Attempt modern GP7/GP8 zipped XML parsing first
+          if (ext === 'gp') {
+            try {
+              parsedScoreData = await parseGpFile(arrayBuffer);
+              isLegacyFormat = false;
+            } catch (zipErr) {
+              parsedScoreData = parseLegacyGpFile(arrayBuffer);
+              isLegacyFormat = true;
+            }
+          } else {
+            // Route all binary formats (GP3-6, MusicXML, Capella) through alphaTab
+            parsedScoreData = parseLegacyGpFile(arrayBuffer);
+            isLegacyFormat = true;
+          }
+        }
+
+        trackSelect.innerHTML = "";
+        parsedScoreData.tracks.forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = t.id;
+          opt.innerText = t.name;
+          trackSelect.appendChild(opt);
+        });
+
+        const melodyIdx = parsedScoreData.tracks.findIndex(t => t.name.toLowerCase().includes("melody"));
+        trackSelect.value = melodyIdx !== -1 ? melodyIdx : 0;
+
+        titleInput.value = parsedScoreData.title || "";
+        settingsPanel.classList.remove('opacity-50', 'pointer-events-none');
+
+        updateRender();
+        showToast(`${file.name.split('.').pop().toUpperCase()} score loaded!`, "fa-circle-check");
+      } catch (err) {
+        console.error(err);
+        showToast("Failed to parse file with alphaTab.", "fa-triangle-exclamation");
+      }
+    });
+
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('border-brand-500'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('border-brand-500'));
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('border-brand-500');
+      if (e.dataTransfer.files.length > 0) {
+        fileInput.files = e.dataTransfer.files;
+        fileInput.dispatchEvent(new Event('change'));
+      }
+    });
+
+    [trackSelect, keySelect, titleInput, barsPerLineInput, chordsInput, dsInput].forEach(el => {
+      el.addEventListener('input', updateRender);
+    });
+
+    abcEditor.addEventListener('input', () => {
+      currentAbcString = abcEditor.value;
+      paper.innerHTML = "";
+      visualObj = ABCJS.renderAbc("paper", currentAbcString, {
+        responsive: "resize",
+        tablature: [{ instrument: "guitar" }],
+        add_classes: true,
+        foregroundColor: "#0f172a",
+        selectionColor: "#22c55e"
+      });
+      initAudioController();
+    });
+
+    btnCopyAbc.addEventListener('click', () => {
+      if (!currentAbcString) return;
+      const textarea = document.createElement('textarea');
+      textarea.value = currentAbcString;
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textarea);
+      showToast("ABC notation copied to clipboard!");
+    });
+
+    btnDownloadAbc.addEventListener('click', () => {
+      if (!currentAbcString) return;
+      const blob = new Blob([currentAbcString], { type: 'text/plain;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${titleInput.value || 'score'}.abc`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      showToast("ABC file downloaded!");
+    });
+
+    function setTab(activeTab, activeView) {
+      [tabNotation, tabCode, tabAlignment].forEach(t => {
+        t.classList.remove('bg-brand-600', 'text-white', 'shadow-md');
+        t.classList.add('bg-slate-800', 'text-slate-400');
+      });
+      [viewNotation, viewCode, viewAlignment].forEach(v => v.classList.add('hidden'));
+
+      activeTab.classList.remove('bg-slate-800', 'text-slate-400');
+      activeTab.classList.add('bg-brand-600', 'text-white', 'shadow-md');
+      activeView.classList.remove('hidden');
+      if (activeView === viewCode) {
+        activeView.classList.add('flex');
+      }
+    }
+
+    tabNotation.addEventListener('click', () => setTab(tabNotation, viewNotation));
+    tabCode.addEventListener('click', () => setTab(tabCode, viewCode));
+    tabAlignment.addEventListener('click', () => setTab(tabAlignment, viewAlignment));
+  </script>
+</body>
+</html>
